@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: salon-belleza
+  namespace: salon-belleza
+  labels:
+    app: salon-belleza
+spec:
+  replicas: 2                        # 2 pods para alta disponibilidad
+  selector:
+    matchLabels:
+      app: salon-belleza
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0              # Zero-downtime deploy
+  template:
+    metadata:
+      labels:
+        app: salon-belleza
+    spec:
+      containers:
+        - name: salon-belleza
+          # ⚠️  Reemplaza <TU_ACR>.azurecr.io con el nombre real de tu ACR
+          image: <TU_ACR>.azurecr.io/salon-belleza:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 80
+              protocol: TCP
+          # Recursos: límites conservadores para una SPA estática
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+          # Liveness: reinicia el pod si nginx deja de responder
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 3
+          # Readiness: solo envía tráfico cuando nginx está listo
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      # Solo un pod por nodo (tolerancia a fallos de nodo)
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: salon-belleza

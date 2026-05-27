@@ -1,0 +1,100 @@
+name: CI/CD → Azure AKS
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  # ⚠️  Ajusta estas 3 variables con tus nombres reales
+  ACR_NAME: tuacr                          # nombre del Azure Container Registry (sin .azurecr.io)
+  AKS_RESOURCE_GROUP: rg-salon-belleza     # Resource Group donde vive el AKS
+  AKS_CLUSTER_NAME: aks-salon-belleza      # Nombre del clúster AKS
+  IMAGE_NAME: salon-belleza
+
+jobs:
+  # ─────────────────────────────────────
+  # JOB 1: Build & Push imagen a ACR
+  # ─────────────────────────────────────
+  build-and-push:
+    name: Build Docker image → ACR
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tag }}
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Generar tag de imagen (SHA corto)
+        id: meta
+        run: echo "tag=$(echo $GITHUB_SHA | cut -c1-8)" >> $GITHUB_OUTPUT
+
+      - name: Login en Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Login en ACR
+        run: az acr login --name $ACR_NAME
+
+      - name: Build y push de imagen Docker
+        run: |
+          IMAGE_URI=$ACR_NAME.azurecr.io/$IMAGE_NAME
+          docker build \
+            --tag $IMAGE_URI:${{ steps.meta.outputs.tag }} \
+            --tag $IMAGE_URI:latest \
+            .
+          docker push $IMAGE_URI:${{ steps.meta.outputs.tag }}
+          docker push $IMAGE_URI:latest
+
+  # ─────────────────────────────────────
+  # JOB 2: Deploy en AKS
+  # ─────────────────────────────────────
+  deploy:
+    name: Deploy → AKS
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Login en Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Obtener credenciales del AKS
+        run: |
+          az aks get-credentials \
+            --resource-group $AKS_RESOURCE_GROUP \
+            --name $AKS_CLUSTER_NAME \
+            --overwrite-existing
+
+      - name: Aplicar manifiestos de Kubernetes
+        run: |
+          kubectl apply -f k8s/namespace.yaml
+          kubectl apply -f k8s/deployment.yaml
+          kubectl apply -f k8s/service.yaml
+          kubectl apply -f k8s/ingress.yaml
+          kubectl apply -f k8s/hpa.yaml
+
+      - name: Actualizar imagen en el Deployment
+        run: |
+          kubectl set image deployment/salon-belleza \
+            salon-belleza=$ACR_NAME.azurecr.io/$IMAGE_NAME:${{ needs.build-and-push.outputs.image_tag }} \
+            -n salon-belleza
+
+      - name: Esperar rollout exitoso
+        run: |
+          kubectl rollout status deployment/salon-belleza \
+            -n salon-belleza \
+            --timeout=120s
+
+      - name: Verificar pods activos
+        run: kubectl get pods -n salon-belleza

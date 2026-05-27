@@ -1,0 +1,29 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: salon-belleza-ingress
+  namespace: salon-belleza
+  annotations:
+    # Usa el Ingress Controller nativo de Azure (AGIC)
+    kubernetes.io/ingress.class: azure/application-gateway
+    # Redirigir HTTP → HTTPS automáticamente
+    appgw.ingress.kubernetes.io/ssl-redirect: "true"
+    # Activar cookie-based affinity si necesitas sesión
+    appgw.ingress.kubernetes.io/cookie-based-affinity: "false"
+spec:
+  rules:
+    - host: salon-belleza.example.com   # ⚠️  Cambia por tu dominio real
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: salon-belleza-svc
+                port:
+                  number: 80
+  # Descomenta y ajusta si tienes TLS/certificado en Azure Key Vault
+  # tls:
+  #   - hosts:
+  #       - salon-belleza.example.com
+  #     secretName: salon-belleza-tls

@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: salon-belleza
+  labels:
+    app: salon-belleza
+    environment: production
